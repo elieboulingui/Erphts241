@@ -78,12 +78,15 @@ model Session {
 }
 
 model VerificationToken {
-  identifier String
-  token      String
-  expires    DateTime
+  identifier  String
+  token       String
+  expires     DateTime
+  isArchived  Boolean?   @default(false)
+  archivedAt  DateTime?
 
-  @@id([identifier, token])
+  @@id([identifier, token], name: "identifier_token")
 }
+
 
 model Authenticator {
   credentialID         String   @unique
