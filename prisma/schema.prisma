@@ -1,37 +1,51 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// This is your Prisma schema file
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// 1. Configuration de base
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
 
 generator client {
   provider = "prisma-client-js"
-  output   = "../lib/generated/prisma"
 }
 
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+// 2. Enums
+enum AccessType {
+  READ
+  WRITE
+  ADMIN
 }
 
- 
+enum Role {
+  ADMIN
+  MEMBRE
+}
 
- 
+// 3. Modèles
+
 model User {
-  id            String          @id @default(cuid())
-  name          String?
-  email         String          @unique
-  emailVerified DateTime?
-  image         String?
-  accounts      Account[]
-  sessions      Session[]
-  // Optional for WebAuthn support
-  Authenticator Authenticator[]
- 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String           @id @default(cuid())
+  name            String?
+  email           String           @unique
+  emailVerified   DateTime?
+  image           String?
+  role            Role             @default(MEMBRE)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  password        String? 
+  accounts        Account[]
+  sessions        Session[]
+  authenticators  Authenticator[]
+  organisations   Organisation[]   @relation("OrganisationMembers")
+  ownedOrgs       Organisation[]   @relation("OrganisationOwner")
+  invitationsSent Invitation[]     @relation("InvitationInviter")
+  passwordTokens  PasswordResetToken[]
 }
- 
+
 model Account {
   userId            String
   type              String
@@ -44,36 +58,35 @@ model Account {
   scope             String?
   id_token          String?
   session_state     String?
- 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
- 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
- 
+
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@id([provider, providerAccountId])
 }
- 
+
 model Session {
-  sessionToken String   @unique
+  sessionToken String    @unique
   userId       String
   expires      DateTime
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
- 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
- 
+
 model VerificationToken {
   identifier String
   token      String
   expires    DateTime
- 
+
   @@id([identifier, token])
 }
- 
-// Optional for WebAuthn support
+
 model Authenticator {
-  credentialID         String  @unique
+  credentialID         String   @unique
   userId               String
   providerAccountId    String
   credentialPublicKey  String
@@ -81,8 +94,58 @@ model Authenticator {
   credentialDeviceType String
   credentialBackedUp   Boolean
   transports           String?
- 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
- 
+
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@id([userId, credentialID])
+}
+
+model Organisation {
+  id           String        @id @default(cuid())
+  name         String        @unique
+  slug         String        @unique
+  logo         String?
+  ownerId      String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  isArchived   Boolean       @default(false)
+  archivedAt   DateTime?
+
+  // Relations
+  owner        User          @relation("OrganisationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members      User[]        @relation("OrganisationMembers")
+  invitations  Invitation[]
+}
+
+model Invitation {
+  id             String        @id @default(cuid())
+  email          String
+  organisationId String
+  role           Role
+  accessType     AccessType
+  invitedById    String
+  token          String        @unique
+  tokenExpiresAt DateTime
+  invitedAt      DateTime      @default(now())
+  acceptedAt     DateTime?
+  isArchived     Boolean       @default(false)
+  archivedAt     DateTime?
+  archivedBy     String?
+
+  // Relations
+  organisation   Organisation  @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  invitedBy      User          @relation("InvitationInviter", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@unique([email, organisationId])
+}
+
+model PasswordResetToken {
+  id         String    @id @default(cuid())
+  userId     String
+  token      String    @unique
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+
+  // Relations
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
