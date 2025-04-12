@@ -2,53 +2,66 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 
 export async function POST(req: NextRequest) {
-  const { identifier, token } = await req.json();
-
-  // Vérification des données reçues
-  if (!identifier || !token) {
-    console.error("Données manquantes dans la requête:", { identifier, token });
-    return NextResponse.json(
-      { error: "Les données du token sont manquantes." },
-      { status: 400 }
-    );
-  }
-
   try {
-    // Recherche du token de vérification avec l'utilisateur associé
+    const body = await req.json();
+    const { identifier, token } = body;
+
+    console.log("Requête reçue:", body);
+
+    // Vérifie que les champs sont présents
+    if (!identifier || !token) {
+      console.error("Données manquantes dans la requête:", { identifier, token });
+      return NextResponse.json(
+        { error: "Les données du token sont manquantes." },
+        { status: 400 }
+      );
+    }
+
+    // Recherche du token
     const verificationToken = await prisma.verificationToken.findUnique({
       where: {
         identifier_token: {
-          identifier, // Email de l'utilisateur
-          token,      // Token de vérification
+          identifier,
+          token,
         },
       },
-      include: {
-        user: true,  // Inclure l'utilisateur lié au token
-      },
     });
 
-    // Si le token n'existe pas ou s'il n'y a pas d'utilisateur associé
-    if (!verificationToken || !verificationToken.user) {
-      console.error("Token non trouvé pour l'email:", identifier);
-      return NextResponse.json({ error: "Token non trouvé." }, { status: 400 });
+    if (!verificationToken) {
+      console.error("Token non trouvé ou expiré:", { identifier, token });
+      return NextResponse.json(
+        { error: "Token non trouvé ou expiré." },
+        { status: 400 }
+      );
     }
 
-    // Marquer l'utilisateur comme vérifié
-    await prisma.user.update({
+    // Recherche de l'utilisateur lié à l'email (identifier)
+    const user = await prisma.user.findUnique({
       where: {
-        email: verificationToken.identifier,
-      },
-      data: {
-        emailVerified: new Date(),
+        email: identifier,
       },
     });
 
-    // Archiver le token de vérification après utilisation
+    if (!user) {
+      console.error("Utilisateur introuvable pour l'email:", identifier);
+      return NextResponse.json(
+        { error: "Utilisateur introuvable pour ce token." },
+        { status: 400 }
+      );
+    }
+
+    // Met à jour le champ emailVerified
+    await prisma.user.update({
+      where: { email: identifier },
+      data: { emailVerified: new Date() },
+    });
+
+    // Archive le token
     await prisma.verificationToken.update({
       where: {
         identifier_token: {
-          identifier: verificationToken.identifier,
-          token: verificationToken.token,
+          identifier,
+          token,
         },
       },
       data: {
@@ -56,21 +69,23 @@ export async function POST(req: NextRequest) {
         archivedAt: new Date(),
       },
     });
-    // Récupérer l'adresse IP de la requête
-    const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'IP inconnue'; // Extraire l'IP depuis les headers
 
-    // Enregistrement de l'action dans ActivityLog
+    // Récupération IP + User-Agent
+    const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'IP inconnue';
+    const userAgent = req.headers.get('user-agent') || '';
+
+    // Log de l'activité
     await prisma.activityLog.create({
       data: {
         action: 'Email Verification',
         entityType: 'User',
-        entityId: verificationToken.identifier, // L'ID de l'utilisateur concerné
-        userId: verificationToken.user.id,      // ID de l'utilisateur qui effectue l'action
-        actionDetails: `Email verification successful for user ${verificationToken.identifier}`,
+        entityId: identifier,
+        userId: user.id,
+        actionDetails: `Email verification successful for user ${identifier}`,
         entityName: 'User',
-        createdByUserId: verificationToken.user.id,  // Celui qui a déclenché l'action
-        ipAddress: ip,                              // IP de la requête
-        userAgent: req.headers.get('user-agent') || '', // User agent de la requête
+        createdByUserId: user.id,
+        ipAddress: ip,
+        userAgent: userAgent,
       },
     });
 
@@ -80,7 +95,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("Erreur lors de la vérification du token:", error);
     return NextResponse.json(
-      { error: "Une erreur est survenue." },
+      { error: "Une erreur est survenue. Veuillez réessayer." },
       { status: 500 }
     );
   }
