@@ -44,6 +44,14 @@ model User {
   ownedOrgs       Organisation[]   @relation("OrganisationOwner")
   invitationsSent Invitation[]     @relation("InvitationInviter")
   passwordTokens  PasswordResetToken[]
+
+  activityCreated ActivityLog[]    @relation("CreatedByUser")
+  activityUpdated ActivityLog[]    @relation("UpdatedByUser")
+  activityRelated ActivityLog[]    @relation("RelatedUser")
+
+  ActivityLog ActivityLog[] @relation(map: "ActivityLog_userId_fkey")
+
+  VerificationToken VerificationToken[]
 }
 
 model Account {
@@ -84,6 +92,10 @@ model VerificationToken {
   isArchived  Boolean?   @default(false)
   archivedAt  DateTime?
 
+  // Relation avec l'utilisateur
+  userId      String?
+  user        User?      @relation(fields: [userId], references: [id])
+
   @@id([identifier, token], name: "identifier_token")
 }
 
@@ -118,6 +130,7 @@ model Organisation {
   owner        User          @relation("OrganisationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   members      User[]        @relation("OrganisationMembers")
   invitations  Invitation[]
+  activityLogs ActivityLog[] @relation("organisation")
 }
 
 model Invitation {
@@ -151,4 +164,47 @@ model PasswordResetToken {
 
   // Relations
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// 10. Modèle de journal d'activité
+model ActivityLog {
+  id             String       @id @default(cuid())
+  action         String
+  entityType     String
+  entityId       String
+  oldData        Json?
+  newData        Json?
+  
+  // User qui a effectué l'action
+  userId         String?
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull, map: "ActivityLog_userId_fkey")
+  
+  // Contexte d'organisation
+  organisationId String?
+  organisation   Organisation? @relation("organisation", fields: [organisationId], references: [id], onDelete: Cascade)
+  
+  // Référence du créateur
+  createdByUserId String?
+  createdBy      User?        @relation("CreatedByUser", fields: [createdByUserId], references: [id], map: "ActivityLog_createdBy_fkey")
+  
+  // Référence de mise à jour
+  updatedByUserId String?
+  updatedBy      User?        @relation("UpdatedByUser", fields: [updatedByUserId], references: [id], map: "ActivityLog_updatedBy_fkey")
+  
+  // Utilisateur concerné (si l'action affecte un autre utilisateur)
+  relatedUserId  String?
+  relatedUser    User?        @relation("RelatedUser", fields: [relatedUserId], references: [id], onDelete: SetNull, map: "ActivityLog_relatedUser_fkey")
+
+  createdAt      DateTime     @default(now())
+  ipAddress      String?
+  userAgent      String?
+  actionDetails  String?
+  entityName     String?
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([organisationId])
+  @@index([createdAt])
+  @@index([action])
+  @@index([relatedUserId])
 }
