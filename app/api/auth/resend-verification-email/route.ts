@@ -1,10 +1,11 @@
 import { generateRandomToken } from '@/lib/generateRandomToken';
 import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
-import { PrismaClient } from '@prisma/client'; // Prisma client import
-const prisma = new PrismaClient(); // Instantiate the Prisma client
+import { PrismaClient } from '@prisma/client';
 
-// Function to send email via nodemailer
+const prisma = new PrismaClient();
+
+// Fonction pour envoyer un email via Nodemailer
 async function sendMail({
   to,
   subject,
@@ -14,10 +15,10 @@ async function sendMail({
   subject: string;
   body: string;
 }) {
-  const { SMTP_EMAIL, SMTP_PASSWORD } = process.env; // Fetch environment variables
+  const { SMTP_EMAIL, SMTP_PASSWORD } = process.env;
 
   const transport = nodemailer.createTransport({
-    service: 'gmail', // Gmail SMTP server
+    service: 'gmail',
     auth: {
       user: SMTP_EMAIL,
       pass: SMTP_PASSWORD,
@@ -25,22 +26,22 @@ async function sendMail({
   });
 
   try {
-    await transport.verify(); // Verify SMTP config
+    await transport.verify();
   } catch (error) {
     console.error('Erreur de configuration du transport:', error);
     return {
       status: 'error',
-      message: 'Erreur de configuration du transport d\'email',
+      message: "Erreur de configuration du transport d'email",
       error,
     };
   }
 
   try {
     const sendResult = await transport.sendMail({
-      from: `"HT241" <${SMTP_EMAIL}>`, // Sender's email
-      to, // Recipient email
-      subject, // Email subject
-      html: body, // Email body (HTML)
+      from: `"HT241" <${SMTP_EMAIL}>`,
+      to,
+      subject,
+      html: body,
     });
 
     console.log('Email envoyé avec succès:', sendResult);
@@ -51,10 +52,10 @@ async function sendMail({
       result: sendResult,
     };
   } catch (error) {
-    console.error('Erreur lors de l\'envoi de l\'email:', error);
+    console.error("Erreur lors de l'envoi de l'email:", error);
     return {
       status: 'error',
-      message: 'Erreur lors de l\'envoi de l\'email',
+      message: "Erreur lors de l'envoi de l'email",
       error,
     };
   }
@@ -62,19 +63,17 @@ async function sendMail({
 
 export async function POST(req: Request) {
   try {
-    // Parse the incoming JSON body
     const { email } = await req.json();
 
     if (!email) {
       return NextResponse.json({ error: 'Email requis' }, { status: 400 });
     }
 
-    // Generate a confirmation token
     const confirmationToken = generateRandomToken();
     const tokenExpiration = new Date();
-    tokenExpiration.setHours(tokenExpiration.getHours() + 1); // Token expires in 1 hour
+    tokenExpiration.setHours(tokenExpiration.getHours() + 1);
 
-    // Store the verification token in the database
+    // Sauvegarde du token dans la base
     await prisma.verificationToken.create({
       data: {
         identifier: email,
@@ -83,7 +82,6 @@ export async function POST(req: Request) {
       },
     });
 
-    // Create email body HTML
     const emailTemplate = `
       <!DOCTYPE html>
       <html lang="fr">
@@ -97,9 +95,7 @@ export async function POST(req: Request) {
               <h1 style="text-align: center; font-size: 24px; margin-bottom: 24px; font-weight: normal;">
                   Vérification de l'email
               </h1>
-              <p style="margin-bottom: 16px;">
-                  Bonjour,
-              </p>
+              <p style="margin-bottom: 16px;">Bonjour,</p>
               <p style="margin-bottom: 32px; line-height: 1.5;">
                   Pour finaliser votre inscription, vous devez vérifier votre adresse e-mail.
               </p>
@@ -130,7 +126,6 @@ export async function POST(req: Request) {
       </html>
     `;
 
-    // Send the email using nodemailer
     const emailResult = await sendMail({
       to: email,
       subject: 'Vérification de votre adresse email sur HT241',
@@ -144,7 +139,26 @@ export async function POST(req: Request) {
       );
     }
 
-    // Return success response
+    // Log de l'activité
+    await prisma.activityLog.create({
+      data: {
+        action: 'EMAIL_VERIFICATION_REQUESTED',
+        entityType: 'VerificationToken',
+        entityId: email,
+        newData: {
+          token: confirmationToken,
+          expires: tokenExpiration.toISOString(),
+        },
+        userId: null,
+        organisationId: null,
+        createdByUserId: null,
+        ipAddress: req.headers.get('x-forwarded-for') || req.headers.get('host') || null,
+        userAgent: req.headers.get('user-agent') || null,
+        actionDetails: `Demande de vérification email envoyée à ${email}`,
+        entityName: email,
+      },
+    });
+
     return NextResponse.json(
       { message: 'Inscription réussie, veuillez vérifier votre email pour confirmer votre compte.' },
       { status: 201 }
