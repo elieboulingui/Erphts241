@@ -12,6 +12,30 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// 2. Enums (regroupés par domaine)
+enum AccessType {
+  READ
+  WRITE
+  ADMIN
+}
+
+enum Role {
+  ADMIN
+  MEMBRE
+}
+
+enum Status_Contact {
+  PERSONNE
+  COMPAGNIE
+  GROSSISTE
+}
+
+enum Niveau {
+  PROSPECT
+  CLIENT
+  PROSPECT_POTENTIAL
+}
+
 enum Domain {
   AGRICULTURE
   ENERGIE
@@ -35,20 +59,86 @@ enum Domain {
   ALIMENTATION
 }
 
-// 2. Enums
-enum AccessType {
-  READ
-  WRITE
-  ADMIN
+enum DevisStatus {
+  ATTENTE
+  VALIDE
+  FACTURE
+  ARCHIVE
 }
 
-enum Role {
-  ADMIN
-  MEMBRE
+enum TaxType {
+  TVA
+  HORS_TAXE
 }
 
-// 3. Modèles
+enum TaskType {
+  FEATURE
+  BUG
+  DOCUMENTATION
+}
 
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  WAITING
+  DONE
+  CANCELLED
+}
+
+enum TaskPriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+// 3. Modèle ActivityLog central
+model ActivityLog {
+  id             String       @id @default(cuid()) 
+  action         String
+  entityType     String
+  entityId       String
+  oldData        Json?
+  newData        Json?
+
+  favoriteId     String?
+  favorite       Favorite?      @relation(fields: [favoriteId], references: [id], onDelete: Cascade)
+
+  // ... autres champs ou index existants ...
+  userId         String?
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull, map: "ActivityLog_userId_fkey")
+
+  organisationId String?
+  organisation   Organisation? @relation("organisation", fields: [organisationId], references: [id], onDelete: Cascade)
+
+  createdByUserId String?
+  createdBy      User?        @relation("CreatedByUser", fields: [createdByUserId], references: [id], map: "ActivityLog_createdBy_fkey")
+
+  updatedByUserId String?
+  updatedBy      User?        @relation("UpdatedByUser", fields: [updatedByUserId], references: [id], map: "ActivityLog_updatedBy_fkey")
+
+  relatedUserId  String?
+  relatedUser    User?        @relation("RelatedUser", fields: [relatedUserId], references: [id], onDelete: SetNull, map: "ActivityLog_relatedUser_fkey")
+
+  productId      String?
+  product        Product?     @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  createdAt      DateTime     @default(now())
+  ipAddress      String?
+  userAgent      String?
+  actionDetails  String?
+  entityName     String?
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([organisationId])
+  @@index([createdAt])
+  @@index([action])
+  @@index([favoriteId])
+  @@index([relatedUserId])
+  @@index([productId])
+}
+
+// 4. Utilisateur
 model User {
   id              String           @id @default(cuid())
   name            String?
@@ -58,27 +148,150 @@ model User {
   role            Role             @default(MEMBRE)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
-
   password        String? 
+
   accounts        Account[]
   sessions        Session[]
   authenticators  Authenticator[]
   organisations   Organisation[]   @relation("OrganisationMembers")
   ownedOrgs       Organisation[]   @relation("OrganisationOwner")
   invitationsSent Invitation[]     @relation("InvitationInviter")
-  invitationsCreated Invitation[]  @relation("CreatedOrganisations") // ✅ Ajouté ici
+  invitationsCreated Invitation[]  @relation("CreatedOrganisations")
   passwordTokens  PasswordResetToken[]
+  VerificationToken VerificationToken[]
 
+  // Création & mises à jour
+  productsCreated Product[] @relation("CreatedByReferences")
+  productsUpdated Product[] @relation("UpdatedByReferences")
+  Favorite        Favorite[] @relation("CreatedByReferences")
+  ContactCreated  Contact[]  @relation("CreatedByReferences")
+  ContactUpdated  Contact[]  @relation("UpdatedByReferences")
+
+  // Logs d'activités
   activityCreated ActivityLog[]    @relation("CreatedByUser")
   activityUpdated ActivityLog[]    @relation("UpdatedByUser")
   activityRelated ActivityLog[]    @relation("RelatedUser")
+  ActivityLog     ActivityLog[]    @relation(map: "ActivityLog_userId_fkey")
+}
 
-  ActivityLog ActivityLog[] @relation(map: "ActivityLog_userId_fkey")
+// 5. Organisation
+model Organisation {
+  id             String        @id @default(cuid())
+  name           String        @unique
+  slug           String        @unique
+  logo           String?
+  ownerId        String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  isArchived     Boolean       @default(false)
+  archivedAt     DateTime?
+  domain         Domain        @default(ALIMENTATION)
+  createdByUserId String?
 
-  VerificationToken VerificationToken[]
+  owner          User          @relation("OrganisationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members        User[]        @relation("OrganisationMembers")
+  invitations    Invitation[]
+  activityLogs   ActivityLog[] @relation("organisation")
+
+  Product        Product[]
+  Favorite       Favorite[]
+  Contact        Contact[]     @relation("OrganisationContacts")
+}
+
+// 6. Produits
+model Product {
+  id             String       @id @default(cuid())
+  name           String
+  description    String
+  price          Float
+  images         String[]
+  actions        String?
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  isArchived     Boolean      @default(false)
+  archivedAt     DateTime?
+  archivedBy     String?
+
+  createdByUserId String?
+  createdByUser   User?        @relation("CreatedByReferences", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUserId String?
+  updatedByUser   User?        @relation("UpdatedByReferences", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  ActivityLog     ActivityLog[]
+}
+
+// 7. Contacts
+model Contact {
+  id             String         @id @default(cuid())
+  name           String
+  logo           String?
+  adresse        String?
+  status_contact Status_Contact @default(PERSONNE)
+  email          String?        @unique
+  phone          String?
+  niveau         Niveau
+  tags           String?
+  sector         String?
+  organisations  Organisation[] @relation("OrganisationContacts")
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  isArchived     Boolean        @default(false)
+  archivedAt     DateTime?
+  archivedBy     String?
+
+  Favorite       Favorite[]
+
+  createdByUserId String?
+  createdByUser   User?          @relation("CreatedByReferences", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUserId String?
+  updatedByUser   User?          @relation("UpdatedByReferences", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+}
+
+// 8. Favoris
+model Favorite {
+  id               String       @id @default(cuid())
+  contactId        String
+  organisationId   String
+  contact          Contact      @relation(fields: [contactId], references: [id])
+  organisation     Organisation @relation(fields: [organisationId], references: [id])
+
+  createdByUserId  String?
+  createdByUser    User?        @relation("CreatedByReferences", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  activityLogs     ActivityLog[] // <- Ajout de cette ligne
+
+  @@unique([contactId, organisationId])
 }
 
 
+// 9. Invitations
+model Invitation {
+  id               String        @id @default(cuid())
+  email            String
+  organisationId   String
+  role             Role
+  accessType       AccessType
+  invitedById      String
+  token            String        @unique
+  tokenExpiresAt   DateTime
+  invitedAt        DateTime      @default(now())
+  acceptedAt       DateTime?
+  isArchived       Boolean       @default(false)
+  archivedAt       DateTime?
+  archivedBy       String?
+
+  createdByUserId  String?
+  createdBy        User?         @relation("CreatedOrganisations", fields: [createdByUserId], references: [id])
+
+  organisation     Organisation  @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  invitedBy        User          @relation("InvitationInviter", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@unique([email, organisationId])
+}
+
+// 10. Auth & Sécurité
 model Account {
   userId            String
   type              String
@@ -138,49 +351,6 @@ model Authenticator {
   @@id([userId, credentialID])
 }
 
-model Organisation {
-  id           String        @id @default(cuid())
-  name         String        @unique
-  slug         String        @unique
-  logo         String?
-  ownerId      String
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  isArchived   Boolean       @default(false)
-  archivedAt   DateTime?
-  domain       Domain        @default(ALIMENTATION)
-createdByUserId String?
-
-  owner        User          @relation("OrganisationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  members      User[]        @relation("OrganisationMembers")
-  invitations  Invitation[]
-  activityLogs ActivityLog[] @relation("organisation")
-}
-
-model Invitation {
-  id               String        @id @default(cuid())
-  email            String
-  organisationId   String
-  role             Role
-  accessType       AccessType
-  invitedById      String
-  token            String        @unique
-  tokenExpiresAt   DateTime
-  invitedAt        DateTime      @default(now())
-  acceptedAt       DateTime?
-  isArchived       Boolean       @default(false)
-  archivedAt       DateTime?
-  archivedBy       String?
-
-  createdByUserId  String?  // ✅ Champ ajouté ici
-  createdBy        User?    @relation("CreatedOrganisations", fields: [createdByUserId], references: [id])
-
-  organisation     Organisation  @relation(fields: [organisationId], references: [id], onDelete: Cascade)
-  invitedBy        User          @relation("InvitationInviter", fields: [invitedById], references: [id], onDelete: Cascade)
-
-  @@unique([email, organisationId])
-}
-
 model PasswordResetToken {
   id         String    @id @default(cuid())
   userId     String
@@ -189,41 +359,4 @@ model PasswordResetToken {
   createdAt  DateTime  @default(now())
 
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-model ActivityLog {
-  id             String       @id @default(cuid())
-  action         String
-  entityType     String
-  entityId       String
-  oldData        Json?
-  newData        Json?
-
-  userId         String?
-  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull, map: "ActivityLog_userId_fkey")
-
-  organisationId String?
-  organisation   Organisation? @relation("organisation", fields: [organisationId], references: [id], onDelete: Cascade)
-
-  createdByUserId String?
-  createdBy      User?        @relation("CreatedByUser", fields: [createdByUserId], references: [id], map: "ActivityLog_createdBy_fkey")
-
-  updatedByUserId String?
-  updatedBy      User?        @relation("UpdatedByUser", fields: [updatedByUserId], references: [id], map: "ActivityLog_updatedBy_fkey")
-
-  relatedUserId  String?
-  relatedUser    User?        @relation("RelatedUser", fields: [relatedUserId], references: [id], onDelete: SetNull, map: "ActivityLog_relatedUser_fkey")
-
-  createdAt      DateTime     @default(now())
-  ipAddress      String?
-  userAgent      String?
-  actionDetails  String?
-  entityName     String?
-
-  @@index([userId])
-  @@index([entityType, entityId])
-  @@index([organisationId])
-  @@index([createdAt])
-  @@index([action])
-  @@index([relatedUserId])
 }
